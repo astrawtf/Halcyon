@@ -1,10 +1,9 @@
 --[[ Halcyon UI Library (Roblox / Luau)
 	local Lib = loadstring(game:HttpGet("RAW_URL"))()
-	Lib:KeyGate{...}  ->  Lib:Loading{...}  ->  Lib:Window{...}  ->  win:Tab{...}
+	Lib:Loading{...}  ->  Lib:Window{...}  ->  win:Tab{...}
 	tab:Section/Toggle/Slider/Dropdown/MultiDropdown/ColorPicker/Input/Button/Keybind
 	Lib:Notify{Title, Text, Type = "Info"|"Success"|"Warning"|"Error", Duration}
 	Values live in Lib.Flags[Flag or Name] and are saved automatically (colors as hex strings, read them with Lib:GetColor(flag)).
-	Admin access: Lib:KeyGate{Admin = {Hwids = {Lib.Hwid() output}, Keys = {Lib.Hash("your key") output}}}. See example.lua.
 ]]
 local UIS, TS, HS, TXT = game:GetService("UserInputService"), game:GetService("TweenService"), game:GetService("HttpService"), game:GetService("TextService")
 local U, O, Sc, V2 = UDim2.new, UDim2.fromOffset, UDim2.fromScale, Vector2.new
@@ -228,24 +227,6 @@ function Lib:Destroy()
 	Lib.Conns, Lib.Guis = {}, {}; table.clear(bound); table.clear(active)
 end
 
--- Machine / key helpers ----------------------------------------------------------------------------------------------
-local function fnv(h, c) -- one FNV-1a round on 32 bits (the prime is applied as shifts to stay exact in doubles)
-	h = bit32.bxor(h, c)
-	return (h + bit32.lshift(h, 1) + bit32.lshift(h, 4) + bit32.lshift(h, 7) + bit32.lshift(h, 8) + bit32.lshift(h, 24)) % 4294967296
-end
-function Lib.Hash(s) -- 64-bit digest: keeps admin keys / machine ids out of plain sight in the source (not a replacement for server checks)
-	local a, b = 2166136261, 0x9E3779B9
-	for i = 1, #s do
-		local c = string.byte(s, i)
-		a, b = fnv(a, c), fnv(b, (c + i * 31) % 256)
-	end
-	return string.format("%08x%08x", a, b)
-end
-function Lib.Hwid() -- hashed id of this machine
-	local ok, id = pcall(function() return (gethwid and gethwid()) or game:GetService("RbxAnalyticsService"):GetClientId() end)
-	return Lib.Hash(ok and tostring(id) or "")
-end
-
 -- bind: shared element plumbing. view(v) updates visuals; the returned set(v) also stores, saves and fires Callback.
 local function bind(o, default, view)
 	local flag = o.Flag; if flag == nil then flag = o.Name end
@@ -441,90 +422,6 @@ function Lib:Loading(o)
 	return ld
 end
 
--- Key gate -----------------------------------------------------------------------------------------------------------
--- Lib:KeyGate{Name, Version, Link, Validate = function(key) return ok, expiryUnixOrError end, Callback = function(key, expiry) end,
---   Admin = {Hwids = {Lib.Hwid()...}, Keys = {Lib.Hash(key)...}}}
--- Admin.Hwids: these machines skip the gate entirely. Admin.Keys: these keys are accepted anywhere. Both never expire (expiry = math.huge).
-function Lib:KeyGate(o)
-	o = mix({Name = "Halcyon", Version = "", Folder = Lib.Folder, Subtitle = "Get a free key through LootLabs. It takes about a minute and stays valid for 24 hours.",
-		Placeholder = "XXXX-XXXX-XXXX", Link = "", ButtonText = "Get key with LootLabs", Status = "Key server online", Steps = {"Get key", "Complete tasks", "Verify"},
-		Admin = {}, Validate = function(k) return k ~= "" end, Callback = function() end}, o)
-	Lib.Folder, o.Title = o.Folder, o.Title or ("Unlock " .. o.Name)
-
-	local admin, id = o.Admin, Lib.Hwid()
-	if table.find(admin.Hwids or {}, id) then return o.Callback("admin", math.huge) end
-	local function check(k)
-		k = k:match("^%s*(.-)%s*$")
-		if k == "" then return false, "Enter a key" end
-		if table.find(admin.Keys or {}, Lib.Hash(k)) then return true, math.huge end
-		return o.Validate(k)
-	end
-
-	local saved = read("key.txt")
-	if saved then
-		local s, ok, info = pcall(check, saved)
-		if s and ok then return o.Callback(saved, info) end
-	end
-
-	local gui, main, scale = shell(o.Name, V2(560, 420))
-	local bar = new("Frame", {Parent = main, Size = U(1, 0, 0, 40)})
-	line(bar, {AnchorPoint = V2(0, 1), Position = Sc(0, 1)})
-	brand(bar, o.Name, nil, {Position = O(16, 0)})
-	controls(bar, nil, function() gui:Destroy() end)
-	drag(bar, main)
-
-	local body = new("Frame", {Parent = main, Position = O(0, 41), Size = U(1, 0, 1, -82), P = {0, 57, 0, 57}, L = 12})
-	body.UIListLayout.VerticalAlignment = Enum.VerticalAlignment.Center
-	label(body, o.Title, 22, "Text", BOLD, {Size = U(1, 0, 0, 32), TextXAlignment = CEN, LayoutOrder = 1})
-	label(body, o.Subtitle, 13, "Sub", nil, {Size = U(1, 0, 0, 40), TextWrapped = true, TextXAlignment = CEN, TextYAlignment = Enum.TextYAlignment.Top, P = {0, 40, 0, 40}, LayoutOrder = 2})
-
-	local stepper, cur, ups = new("Frame", {Parent = body, Size = U(1, 0, 0, 30), LayoutOrder = 3, L = {12, "H"}}), 1, {}
-	stepper.UIListLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
-	for i, s in ipairs(o.Steps) do
-		if i > 1 then line(stepper, {Size = O(32, 1), LayoutOrder = i * 2 - 1}) end
-		local f = new("Frame", {Parent = stepper, AutomaticSize = AXY, Size = O(0, 0), LayoutOrder = i * 2, L = {8, "H"}})
-		local c = function(t) return i <= cur and t.Text or t.Muted end
-		local _, u1 = label(f, tostring(i), 11, c, MED, {Size = O(22, 22), TextXAlignment = CEN, R = 11, S = c, LayoutOrder = 1})
-		local _, u2 = label(f, s, 13, c, nil, {AutomaticSize = AX, Size = O(0, 22), LayoutOrder = 2})
-		ups[#ups + 1] = function() u1(); u2() end
-	end
-	local function step(k) cur = k; for _, u in ipairs(ups) do u() end end
-
-	local inp = new("Frame", {Parent = body, Size = U(1, 0, 0, 44), LayoutOrder = 4})
-	local box = new("TextBox", {Parent = inp, Size = U(1, -104, 1, 0), BackgroundTransparency = 0, R = 8, S = "Border", P = {0, 14, 0, 14}, ClearTextOnFocus = false,
-		PlaceholderText = o.Placeholder, FontFace = Lib.Mono, TextSize = 13, T = {BackgroundColor3 = "Field", TextColor3 = "Text", PlaceholderColor3 = "Muted"}})
-	local vb, vl = button(inp, "Verify", true, {AnchorPoint = V2(1, 0), Position = Sc(1, 0), Size = U(0, 92, 1, 0)})
-	new("UIGradient", {Parent = vb, Color = ColorSequence.new(Color3.new(1, 1, 1), Color3.fromRGB(220, 220, 220))})
-	local gb, gl = button(body, o.ButtonText, false, {Size = U(1, 0, 0, 44), LayoutOrder = 5})
-	gb.Activated:Connect(function()
-		pcall(setclipboard, o.Link); step(2); gl.Text = "Link copied to clipboard"
-		task.delay(2, function() gl.Text = o.ButtonText end)
-	end)
-
-	local ft, good = new("Frame", {Parent = main, AnchorPoint = V2(0, 1), Position = Sc(0, 1), Size = U(1, 0, 0, 40)}), true
-	line(ft)
-	local _, su = dot(ft, function(t) return good and t.Success or t.Danger end, {Position = U(0, 20, .5, -3)})
-	local st = label(ft, o.Status, 12, "Sub", nil, {Position = O(36, 0), Size = U(.6, 0, 1, 0)})
-	label(ft, o.Version, 12, "Muted", nil, {AnchorPoint = V2(1, 0), Position = U(1, -20, 0, 0), Size = U(.3, 0, 1, 0), TextXAlignment = RIGHT, FontFace = Lib.Mono})
-	local function status(t, g) good, st.Text = g, t; su() end
-	box:GetPropertyChangedSignal("Text"):Connect(function() status(o.Status, true) end)
-
-	local busy
-	local function verify()
-		if busy then return end
-		busy = true; step(3); vl.Text = "Checking..."
-		local s, ok, info = pcall(check, box.Text)
-		busy, vl.Text = false, "Verify"
-		if s and ok then
-			local key = box.Text:match("^%s*(.-)%s*$")
-			write("key.txt", key); tw(scale, {Scale = .95}, .15); task.wait(.15); gui:Destroy(); o.Callback(key, info)
-		else step(2); status(s and tostring(info or "Invalid key") or "Validation failed", false) end
-	end
-	vb.Activated:Connect(verify)
-	box.FocusLost:Connect(function(enter) if enter then verify() end end)
-	return gui
-end
-
 -- Elements -----------------------------------------------------------------------------------------------------------
 local TabM = {}
 local function row(tab, o) -- label/description on the left, returns r and a right-aligned container for the control
@@ -718,7 +615,7 @@ function TabM:Keybind(o) -- {Name, Desc, Flag, Default = Enum.KeyCode, Callback(
 end
 
 -- Window -------------------------------------------------------------------------------------------------------------
--- Lib:Window{Name, Version, Crumb, Game, Expiry, Size, Min, ToggleKey, Config, Folder}
+-- Lib:Window{Name, Version, Crumb, Game, Size, Min, ToggleKey, Config, Folder}
 function Lib:Window(o)
 	o = mix({Name = "Halcyon", Version = "", Crumb = "Game", Game = "", Size = V2(780, 540), Min = V2(700, 420), ToggleKey = Enum.KeyCode.RightShift, Config = Lib.Config, Folder = Lib.Folder}, o)
 	Lib.Folder, Lib.Config = o.Folder, o.Config
@@ -728,13 +625,13 @@ function Lib:Window(o)
 	Lib.Flags.__toggle_key = tk
 
 	local gui, main, scale = shell(o.Name, o.Size, o.Min)
-	local Win, tabs, lastSection, expiry, alive = {Gui = gui}, {}, nil, nil, true
+	local Win, tabs, lastSection = {Gui = gui}, {}, nil
 
 	local side = new("Frame", {Parent = main, Size = U(0, 200, 1, 0)})
 	line(main, {Position = O(200, 0), Size = U(0, 1, 1, 0)})
 	local head = new("Frame", {Parent = side, Size = U(1, 0, 0, 56), P = {0, 0, 0, 20}})
 	brand(head, o.Name, o.Version)
-	local nav = new("Frame", {Parent = side, Position = O(0, 56), Size = U(1, 0, 1, -120), P = {0, 12, 0, 12}, L = 2})
+	local nav = new("Frame", {Parent = side, Position = O(0, 56), Size = U(1, 0, 1, -56), P = {0, 12, 0, 12}, L = 2})
 	local content = new("Frame", {Parent = main, Position = O(201, 0), Size = U(1, -201, 1, 0), ClipsDescendants = true})
 	local top = new("Frame", {Parent = content, Size = U(1, 0, 0, 56)})
 	local crumb = new("Frame", {Parent = top, Size = U(1, -260, 1, 0), P = {0, 0, 0, 32}, L = {10, "H"}, ClipsDescendants = true})
@@ -767,24 +664,6 @@ function Lib:Window(o)
 	end
 	local _, query = search(top, "Search", "Field", {AnchorPoint = V2(1, .5), Position = U(1, -84, .5, 0), Size = O(168, 30), Active = true})
 	query:GetPropertyChangedSignal("Text"):Connect(function() filter(query.Text) end)
-
-	-- key status (sidebar footer)
-	local kb = new("Frame", {Parent = side, AnchorPoint = V2(0, 1), Position = Sc(0, 1), Size = U(1, 0, 0, 64), Visible = false})
-	line(kb)
-	local _, upDot = dot(kb, function(t) return alive and t.Success or t.Danger end, {Position = O(22, 20)})
-	local kl = label(kb, "Key active", 12, "Text", MED, {Position = O(36, 12), Size = O(150, 18)})
-	local kt = label(kb, "", 12, "Sub", nil, {Position = O(22, 32), Size = O(160, 18)})
-	local function tick()
-		if not expiry then return end
-		local s = expiry - os.time()
-		alive = s > 0
-		kl.Text = alive and "Key active" or "Key expired"
-		kt.Text = not alive and "Renew to continue" or s == math.huge and "Permanent" or string.format("%dh %dm remaining", s // 3600, s % 3600 // 60)
-		upDot()
-	end
-	function Win:SetKey(e) expiry, kb.Visible = e, e ~= nil; tick() end
-	if o.Expiry then Win:SetKey(o.Expiry) end
-	task.spawn(function() while gui.Parent do tick(); task.wait(20) end end)
 
 	function Win:Show(v)
 		if v == nil then v = not main.Visible end
